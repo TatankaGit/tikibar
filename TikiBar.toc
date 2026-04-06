@@ -1,0 +1,10 @@
+## Interface: 120001
+## Version: 1.0.0
+## Title: Tiki Bar
+## Notes: Tikitiki's personal info bar
+## Author: Tikitiki
+## SavedVariables: TikiBarDB
+
+TikiBar.lua
+TBSettings.lua
+Widgets.lua
