@@ -10,10 +10,12 @@ addon.ADDON_TITLE = "Tiki Bar"
 addon.DEFAULTS    = { 
     height = 24,
     padding = 6,
+    fontSize = 12,
     hearthToyID = 0,
     hearthToyName = "Hearthstone",
 }
 addon.widgets = {}
+addon.widgetFonts = {}
 addon.widgetGroups = {
     LEFT = {},
     CENTER = {},
@@ -133,6 +135,54 @@ end)
 -- ============================================================
 -- Refresh the bar and rerender
 -- ============================================================
+
+function addon:RegisterWidgetFont(fontString)
+    table.insert(self.widgetFonts, fontString)
+    self:ApplyWidgetFontSize(fontString)
+end
+
+function addon:UnregisterWidgetFont(fontString)
+    for i = #self.widgetFonts, 1, -1 do
+        if self.widgetFonts[i] == fontString then
+            table.remove(self.widgetFonts, i)
+            break
+        end
+    end
+end
+
+function addon:RemoveWidget(widget, anchor)
+    anchor = anchor or "LEFT"
+    local group = self.widgetGroups[anchor]
+    for i = #group, 1, -1 do
+        if group[i] == widget then
+            table.remove(group, i)
+            break
+        end
+    end
+    for i = #self.widgets, 1, -1 do
+        if self.widgets[i] == widget then
+            table.remove(self.widgets, i)
+            break
+        end
+    end
+end
+
+function addon:ApplyWidgetFontSize(fontString)
+    local font, _, flags = fontString:GetFont()
+    if not font then return end
+    local size = (TikiBarDB and TikiBarDB.fontSize) or self.DEFAULTS.fontSize
+    fontString:SetFont(font, size, flags)
+end
+
+function addon:RefreshWidgetFonts()
+    for _, fs in ipairs(self.widgetFonts) do
+        self:ApplyWidgetFontSize(fs)
+    end
+    if self.hearthWidget and self.hearthWidget.RefreshPopupLayout then
+        self.hearthWidget:RefreshPopupLayout()
+    end
+    self:RefreshLayout()
+end
 
 function addon:RefreshLayout()
     for _, widget in ipairs(self.widgets) do
