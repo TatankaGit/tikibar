@@ -11,6 +11,7 @@ addon.DEFAULTS    = {
     height = 24,
     padding = 6,
     hearthToyID = 0,
+    hearthToyName = "Hearthstone",
 }
 addon.widgets = {}
 addon.widgetGroups = {

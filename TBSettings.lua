@@ -78,6 +78,7 @@ function TikiBar_BuildSettings()
 
         local function SetValue(value)
             TikiBarDB.hearthToyID = value
+            TikiBarDB.hearthToyName = addon.HEARTH_TOY_OPTIONS[value].name
         end
 
         local setting = Settings.RegisterProxySetting(

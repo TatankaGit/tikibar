@@ -1,38 +1,6 @@
 local addon = TikiBar
 
 -- ============================================================
--- Shared API Shims (Midnight-compatible)
--- ============================================================
-
-local function TB_IsSpellKnown(spellID)
-    if C_Spell and C_Spell.IsSpellKnown then
-        return C_Spell.IsSpellKnown(spellID)
-    end
-    return IsSpellKnown(spellID)
-end
-
-local function TB_GetSpellName(spellID)
-    if C_Spell and C_Spell.GetSpellName then
-        return C_Spell.GetSpellName(spellID)
-    end
-    local name = GetSpellInfo(spellID)
-    return name
-end
-
-local function TB_FindItemInBags(itemID)
-    for bag = 0, (NUM_BAG_SLOTS or 4) do
-        local numSlots = C_Container.GetContainerNumSlots(bag)
-        for slot = 1, numSlots do
-            local info = C_Container.GetContainerItemInfo(bag, slot)
-            if info and info.itemID == itemID then
-                return bag, slot
-            end
-        end
-    end
-    return nil, nil
-end
-
--- ============================================================
 -- Hearth Widget Data
 -- ============================================================
 
@@ -42,31 +10,19 @@ end
 -- isToy = false → availability checked via bag scan
 -- All are used via SecureActionButton type="item" regardless of isToy.
 local SECONDARY_HEARTHS = {
-    { id = 140192, name = "Dalaran Hearthstone",             dest = "Dalaran (Legion)",  isToy = true  },
-    { id = 110560, name = "Garrison Hearthstone",            dest = "Garrison",          isToy = true  },
-    { id = 93672,  name = "Dark Portal",                     dest = "Blasted Lands",     isToy = true  },
-    { id = 211788, name = "Tess's Peacebloom",               dest = "Gilneas",           isToy = true  },
-    { id = 253629, name = "Personal Key to the Arcantina",   dest = "Silvermoon Inn",    isToy = true  },
+    { id = 140192, name = "Dalaran Hearthstone",             dest = "Dalaran",      isToy = true  },
+    { id = 110560, name = "Garrison Hearthstone",            dest = "Garrison",     isToy = true  },
+    { id = 211788, name = "Tess's Peacebloom",               dest = "Gilneas",      isToy = true  },
+    { id = 253629, name = "Personal Key to the Arcantina",   dest = "Arcantina",    isToy = true  },
 }
 
 -- Class teleport spell IDs, keyed by English class token.
 -- Checked against IsSpellKnown at popup-build time; unlearned spells are omitted.
 local CLASS_TELEPORTS = {
-    DRUID       = { 193753  },  -- Dreamwalk
-    DEATHKNIGHT = { 50977   },  -- Death Gate
-    MONK        = { 126892  },  -- Zen Pilgrimage
-    SHAMAN      = { 556     },  -- Astral Recall
-    EVOKER      = { 361584  },  -- Return
-    WARLOCK     = { 48020   },  -- Demonic Circle: Teleport
-    MAGE = {
-        3561,   3562,   3565,   32271,
-        33836,  3563,   3567,   32276,
-        33690,  33691,
-        53140,  53142,
-        168487, 193759,
-        281404, 281403,
-        344587, 468655,
-    },
+    DRUID       = { id = 193753, name = "Dreamwalk", dest = "Dreamwalk", isToy = false  },  -- Dreamwalk
+    DEATHKNIGHT = { id = 50977, name = "Death Gate", dest = "Death Gate", isToy = false  },  -- Death Gate
+    MONK        = { id = 126892, name = "Zen Pilgrimage", dest = "Zen Pilgrimage", isToy = false  },  -- Zen Pilgrimage
+    SHAMAN      = { id = 556, name = "Astral Recall", dest = "Astral Recall", isToy = false  },  -- Astral Recall
 }
 
 
@@ -221,156 +177,28 @@ local function CreateHearthWidget()
     hearthText:SetText("Home")
     hearthText:SetWidth(0)
 
-    local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    popup:SetFrameStrata("TOOLTIP")
-    popup:SetClampedToScreen(true)
-    popup:Hide()
-    popup:SetBackdrop({
-        bgFile   = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-    })
-    popup:SetBackdropColor(0.06, 0.06, 0.06, 0.96)
-    popup:SetBackdropBorderColor(0.22, 0.22, 0.22, 1)
+    -- Establish avaialble teleports/hearths
 
-    -- ── Button pool ───────────────────────────────────────────────
-    local buttonPool = {}
-
-    local function AcquireButton()
-        for _, btn in ipairs(buttonPool) do
-            if not btn:IsShown() then return btn end
+    local availableTeleports = {}
+    availableTeleports.hearthstone = {id = addon.DEFAULTS.hearthToyID, name = TikiBarDB.hearthToyName, dest = GetBindLocation(), isToy = false}
+    for _, teleport in ipairs(SECONDARY_HEARTHS) do
+        if PlayerHasToy(teleport.id) then
+            availableTeleports[teleport.name] = {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy}
         end
-        local btn = CreateFrame("Button", nil, popup, "SecureActionButtonTemplate")
-        btn:SetFrameLevel(popup:GetFrameLevel() + 2)
-        btn:SetHeight(ENTRY_H)
-        btn:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
-        btn:GetHighlightTexture():SetVertexColor(1, 1, 1, 0.08)
-        local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("LEFT",  btn, "LEFT",  8, 0)
-        lbl:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
-        lbl:SetJustifyH("LEFT")
-        lbl:SetTextColor(1, 1, 1)
-        btn.lbl = lbl
-        btn:SetScript("PostClick", function()
-            popup:Hide()
-        end)
-        table.insert(buttonPool, btn)
-        return btn
+    end
+    for _, teleport in ipairs(CLASS_TELEPORTS) do
+        if IsSpellKnown(teleport.id) then
+            availableTeleports.[teleport.name] = {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy}
+        end
     end
 
-    local headerPool = {}
+    -- Create Menu
 
-    local function AcquireHeader()
-        for _, h in ipairs(headerPool) do
-            if not h:IsShown() then return h end
-        end
-        local h = CreateFrame("Frame", nil, popup)
-        h:SetHeight(HEADER_H)
-        local t = h:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        t:SetPoint("LEFT", h, "LEFT", 8, 0)
-        t:SetTextColor(0.5, 0.5, 0.5)
-        h.text = t
-        table.insert(headerPool, h)
-        return h
-    end
 
-    -- ── Build popup ───────────────────────────────────────────────
-    local function BuildPopup()
-        -- Reset all pooled frames
-        for _, b in ipairs(buttonPool) do b:Hide() end
-        for _, h in ipairs(headerPool) do h:Hide() end
 
-        local rows = {}  -- { frame, height }
-
-        local function AddHeader(text)
-            local h = AcquireHeader()
-            h:SetWidth(POPUP_W)
-            h.text:SetText(text)
-            h:Show()
-            table.insert(rows, { frame = h, height = HEADER_H })
-        end
-
-        local function AddButton(labelText, actionType, actionValue)
-            local btn = AcquireButton()
-            btn:SetWidth(POPUP_W)
-            btn.lbl:SetText(labelText)
-            -- Same as Dreamwalk widget: set secure attributes directly (no macrotext /
-            -- SecureHandlerExecute). Toys and hearth items use type "item" with item/toy id.
-            if actionType == "item" then
-                btn:SetAttribute("spell", nil)
-                btn:SetAttribute("type", "item")
-                btn:SetAttribute("item", actionValue)
-            elseif actionType == "spell" then
-                btn:SetAttribute("item", nil)
-                btn:SetAttribute("type", "spell")
-                btn:SetAttribute("spell", actionValue)
-            end
-            btn:RegisterForClicks("AnyUp", "AnyDown")
-            btn:Show()
-            table.insert(rows, { frame = btn, height = ENTRY_H })
-        end
-
-        -- 1. Primary Hearthstone
-        local toyID = TikiBarDB and TikiBarDB.hearthToyID or 0
-        local primaryDest = (GetBindLocation and GetBindLocation()) or "Home"
-        if toyID ~= 0 and PlayerHasToy(toyID) then
-            local toyName = (C_Item.GetItemNameByID and C_Item.GetItemNameByID(toyID)) or "Hearthstone"
-            AddButton(toyName, "item", toyID)
-        else
-            AddButton("Hearthstone", "item", 6948)
-        end
-
-        -- 2. Secondary Hearthstones
-        local secondaryAdded = false
-        for _, entry in ipairs(SECONDARY_HEARTHS) do
-            local available = entry.isToy and PlayerHasToy(entry.id)
-                              or (not entry.isToy and TB_FindItemInBags(entry.id) ~= nil)
-            if available then
-                if not secondaryAdded then
-                    AddHeader("Other Hearthstones")
-                    secondaryAdded = true
-                end
-                local itemName = (C_Item.GetItemNameByID and C_Item.GetItemNameByID(entry.id))
-                                 or entry.name
-                AddButton(itemName, "item", entry.id)
-            end
-        end
-
-        -- 3. Class Teleport Abilities
-        local _, playerClass = UnitClass("player")
-        local spells = CLASS_TELEPORTS[playerClass]
-        local classAdded = false
-        if spells then
-            for _, spellID in ipairs(spells) do
-                if TB_IsSpellKnown(spellID) then
-                    if not classAdded then
-                        AddHeader("Class Abilities")
-                        classAdded = true
-                    end
-                    local spellName = TB_GetSpellName(spellID) or ("Spell " .. spellID)
-                    AddButton(spellName, "spell", spellID)
-                end
-            end
-        end
-
-        -- Stack rows top-to-bottom inside the popup
-        local totalH = PAD
-        for i, row in ipairs(rows) do
-            row.frame:ClearAllPoints()
-            row.frame:SetPoint("TOPLEFT", popup, "TOPLEFT", 0, -totalH)
-            totalH = totalH + row.height + (i < #rows and 2 or 0)
-        end
-        totalH = totalH + PAD
-        popup:SetSize(POPUP_W, totalH)
-    end
-
-    -- ── Widget text / layout ──────────────────────────────────────
-    local function GetHearthDestText()
-        return (GetBindLocation and GetBindLocation()) or "Home"
-    end
-
+    -- ── Widget functions ──────────────────────────────────────
     local function UpdateHearthText()
-        hearthText:SetText(GetHearthDestText())
+        hearthText:SetText((GetBindLocation and GetBindLocation()) or "Home")
     end
 
     function hearthWidget:UpdateLayout()
@@ -381,44 +209,15 @@ local function CreateHearthWidget()
 
     hearthWidget:EnableMouse(true)
 
-    hearthWidget:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:ClearLines()
-        GameTooltip:AddLine("Hearthstone")
-        GameTooltip:AddLine("Click to open teleport menu", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-
-    hearthWidget:SetScript("OnLeave", function(self)
-        GameTooltip:Hide()
-    end)
-
-    hearthWidget:SetScript("OnMouseUp", function(self, button)
-        if button ~= "LeftButton" then return end
-        if popup:IsShown() then
-            popup:Hide()
-            return
-        end
-        BuildPopup()
-        popup:ClearAllPoints()
-        popup:SetPoint("BOTTOMRIGHT", self, "TOPRIGHT", 0, 2)
-        popup:Show()
-    end)
-
     hearthWidget:RegisterEvent("PLAYER_LOGIN")
     hearthWidget:RegisterEvent("PLAYER_ENTERING_WORLD")
+    hearthWidget:RegisterEvent("HEARTHSTONE_BOUND")
     hearthWidget:SetScript("OnEvent", function(self)
         C_Timer.After(0, function()
             UpdateHearthText()
             self:UpdateLayout()
             addon:LayoutGroups()
         end)
-    end)
-
-    UpdateHearthText()
-    C_Timer.After(0, function()
-        hearthWidget:UpdateLayout()
-        addon:LayoutGroups()
     end)
 
     return hearthWidget
