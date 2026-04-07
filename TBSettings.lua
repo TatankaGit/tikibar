@@ -37,6 +37,34 @@ function TikiBar_BuildSettings()
     end
 
     -- ============================================================
+    -- Font Size Slider
+    -- ============================================================
+    do
+        local name = "Font Size"
+        local variable = "FontSize_Slider"
+        local defaultValue = addon.DEFAULTS.fontSize
+        local minValue = 8
+        local maxValue = 24
+        local step = 1
+
+        local function GetValue()
+            return TikiBarDB and TikiBarDB.fontSize or addon.DEFAULTS.fontSize
+        end
+
+        local function SetValue(value)
+            TikiBarDB.fontSize = value
+            addon:RefreshWidgetFonts()
+        end
+
+        local setting = Settings.RegisterProxySetting(category, variable, type(defaultValue), name, defaultValue, GetValue, SetValue)
+
+        local tooltip = "Adjust the font size for the addon."
+        local options = Settings.CreateSliderOptions(minValue, maxValue, step)
+        options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+        Settings.CreateSlider(category, setting, options, tooltip)
+    end
+
+    -- ============================================================
     -- Widget Padding Slider
     -- ============================================================
     do
@@ -78,7 +106,15 @@ function TikiBar_BuildSettings()
 
         local function SetValue(value)
             TikiBarDB.hearthToyID = value
-            TikiBarDB.hearthToyName = addon.HEARTH_TOY_OPTIONS[value].name
+            local name = addon.DEFAULTS.hearthToyName
+            for _, opt in ipairs(addon.HEARTH_TOY_OPTIONS) do
+                if opt.id == value then
+                    name = opt.name
+                    break
+                end
+            end
+            TikiBarDB.hearthToyName = name
+            addon:ReinitializeHearthWidget()
         end
 
         local setting = Settings.RegisterProxySetting(
