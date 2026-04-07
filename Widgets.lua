@@ -36,6 +36,7 @@ local function CreateClockWidget()
     clockText:SetPoint("CENTER")
     clockText:SetText("00:00")
     clockText:SetWidth(0)
+    addon:RegisterWidgetFont(clockText)
 
     -- Update time text
     local function UpdateTime()
@@ -94,6 +95,7 @@ local function CreateSpecWidget()
     specText:SetPoint("CENTER")
     specText:SetText("Placeholder")
     specText:SetWidth(0)
+    addon:RegisterWidgetFont(specText)
 
     local function UpdateSpecText()
         local specIndex = GetSpecialization()
@@ -169,37 +171,123 @@ local function CreateHearthWidget()
     local POPUP_W   = 220
     local ENTRY_H   = 22
     local HEADER_H  = 18
-    local PAD       = 6
+    local PAD       = addon.DEFAULTS.padding
 
-    local hearthWidget = CreateFrame("Frame", "HearthWidget", addon.bar)
+    local hearthWidget = CreateFrame("Frame", nil, addon.bar)
+    local hearthFonts = {}
+    local function registerHearthFont(fs)
+        table.insert(hearthFonts, fs)
+        addon:RegisterWidgetFont(fs)
+    end
+
     local hearthText = hearthWidget:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     hearthText:SetPoint("CENTER")
     hearthText:SetText("Home")
     hearthText:SetWidth(0)
+    registerHearthFont(hearthText)
 
-    -- Establish avaialble teleports/hearths
+    local popup = CreateFrame("Frame", nil, hearthWidget, "BackdropTemplate")
+    hearthWidget.popup = popup
+    popup:SetSize(POPUP_W, ENTRY_H * 2 + HEADER_H + PAD * 2)
+    popup:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+    popup:SetBackdropColor(0, 0, 0, 0.75)
+    popup:SetBackdropBorderColor(0.15, 0.15, 0.15, 1)
+    popup:Hide()
+
+    -- Establish avaialble teleports/hearths and their secureactionbuttons
 
     local availableTeleports = {}
-    availableTeleports.hearthstone = {id = addon.DEFAULTS.hearthToyID, name = TikiBarDB.hearthToyName, dest = GetBindLocation(), isToy = false}
+    local teleportButtons = {}
+
+    table.insert(availableTeleports, {id = TikiBarDB.hearthToyID, name = TikiBarDB.hearthToyName, dest = GetBindLocation(), isToy = true})
     for _, teleport in ipairs(SECONDARY_HEARTHS) do
         if PlayerHasToy(teleport.id) then
-            availableTeleports[teleport.name] = {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy}
+            table.insert(availableTeleports, {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy})
         end
     end
-    for _, teleport in ipairs(CLASS_TELEPORTS) do
+    for _, teleport in pairs(CLASS_TELEPORTS) do
         if IsSpellKnown(teleport.id) then
-            availableTeleports.[teleport.name] = {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy}
+            table.insert(availableTeleports, {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy})
         end
     end
 
-    -- Create Menu
+    function hearthWidget:CreateTeleportButtons(index, teleport)
+        local btn = CreateFrame("Button", nil, self.popup, "SecureActionButtonTemplate")
+        btn:SetSize(100, 20)
+        btn:SetPoint("TOPLEFT", self.popup, "TOPLEFT", PAD, -PAD - (index - 1) * ENTRY_H)
+        btn:SetAttribute("type", teleport.isToy and "toy" or "spell")
+        btn:SetAttribute(teleport.isToy and "toy" or "spell", teleport.id)
+        btn:RegisterForClicks("AnyUp", "AnyDown")
+        -- Remove default button textures
+        btn:SetNormalTexture("")
+        btn:SetHighlightTexture("")
+        btn:SetPushedTexture("")
+        btn:SetScript("PostClick", function()
+            popup:Hide()
+        end)
+    
+        local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        label:SetAllPoints(btn)
+        label:SetJustifyH("LEFT")
+        label:SetJustifyV("MIDDLE")
+        label:SetText(teleport.name)
+        registerHearthFont(label)
+
+        btn.label = label
+        teleportButtons[index] = btn
+    end
+
+    function hearthWidget:RefreshPopupLayout()
+        local maxWidth = 0
+        for _, btn in ipairs(teleportButtons) do
+            if btn then
+                maxWidth = math.max(maxWidth, btn.label:GetStringWidth())
+            end
+        end
+        local y = PAD
+        for _, btn in ipairs(teleportButtons) do
+            if not btn then break end
+            local h = math.max(ENTRY_H, btn.label:GetHeight())
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", popup, "TOPLEFT", PAD, -y)
+            btn:SetHeight(h)
+            btn:SetWidth(maxWidth + PAD * 2)
+            y = y + h + 2
+        end
+        popup:SetSize(maxWidth + PAD * 2, y + PAD)
+        popup:SetPoint("BOTTOM", hearthWidget, "TOPLEFT", 0, 0)
+    end
+
+    for i, teleport in ipairs(availableTeleports) do
+        hearthWidget:CreateTeleportButtons(i, teleport)
+    end
+
+    popup:SetFrameStrata("HIGH")
+    popup:EnableMouse(true)
+
+    hearthWidget:RefreshPopupLayout()
+
 
 
 
     -- ── Widget functions ──────────────────────────────────────
     local function UpdateHearthText()
         hearthText:SetText((GetBindLocation and GetBindLocation()) or "Home")
+        GameTooltip:Hide()
     end
+    popup:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            if popup:IsShown() then
+                popup:Hide()
+            else
+                popup:Show()
+            end
+        end
+    end)
 
     function hearthWidget:UpdateLayout()
         local padding = TikiBarDB.padding
@@ -209,6 +297,31 @@ local function CreateHearthWidget()
 
     hearthWidget:EnableMouse(true)
 
+    -- Tooltip
+    hearthWidget:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine("Hearthstones")
+        GameTooltip:AddLine("Left-Click to open teleport menu", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+
+    hearthWidget:SetScript("OnLeave", function(self)
+        GameTooltip:Hide()
+    end)
+
+    -- Click handler
+    hearthWidget:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            if popup:IsShown() then
+                popup:Hide()
+            else
+                popup:Show()
+            end
+        end
+    end)
+
+    -- Event Handlers
     hearthWidget:RegisterEvent("PLAYER_LOGIN")
     hearthWidget:RegisterEvent("PLAYER_ENTERING_WORLD")
     hearthWidget:RegisterEvent("HEARTHSTONE_BOUND")
@@ -220,76 +333,36 @@ local function CreateHearthWidget()
         end)
     end)
 
+    -- Events only run on login/world/hearth change; after a mid-session reinit they do not fire
+    -- again, so apply bind location here (same text RefreshLayout will use for width).
+    UpdateHearthText()
+
+    hearthWidget.hearthFonts = hearthFonts
+    addon.hearthWidget = hearthWidget
     return hearthWidget
 end
 
--- ============================================================
--- Dreamwalk (Druid)
--- SecureActionButtonTemplate: only type/spell via SecureHandlerExecute (restricted
--- env rejects _onclick and macrotext-style attributes on SetAttribute).
--- ============================================================
-
-local DREAMWALK_SPELL_ID = 193753
-
-local function CreateDreamwalkWidget()
-    local w = CreateFrame("Frame", "TikiBarDreamwalkWidget", addon.bar)
-    w:EnableMouse(true)
-
-    local btn = CreateFrame("Button", "TikiBarDreamwalkButton", w, "SecureActionButtonTemplate")
-    btn:SetSize(100, 20)
-    btn:SetPoint("CENTER")
-    btn:SetAttribute("type", "spell")
-    btn:SetAttribute("spell", DREAMWALK_SPELL_ID)
-    btn:RegisterForClicks("AnyUp", "AnyDown")
-    -- Remove default button textures
-    btn:SetNormalTexture("")
-    btn:SetHighlightTexture("")
-    btn:SetPushedTexture("")
-
-    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    label:SetAllPoints(btn)
-    label:SetText("Dreamwalk")
-
-
-    btn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:ClearLines()
-        GameTooltip:AddLine(TB_GetSpellName(DREAMWALK_SPELL_ID) or "Dreamwalk", 1, 1, 1)
-        GameTooltip:AddLine("Click to cast", 0.75, 0.75, 0.75)
-        GameTooltip:Show()
-    end)
-    btn:SetScript("OnLeave", GameTooltip_Hide)
-
-    function w:UpdateLayout()
-        local padding = (TikiBarDB and TikiBarDB.padding) or addon.DEFAULTS.padding
-        if self:IsShown() then
-            self:SetSize(label:GetStringWidth() + padding * 2, TikiBarDB and TikiBarDB.height or addon.DEFAULTS.height)
-        else
-            self:SetSize(0, TikiBarDB and TikiBarDB.height or addon.DEFAULTS.height)
+function addon:ReinitializeHearthWidget()
+    local old = self.hearthWidget
+    if old then
+        if old.hearthFonts then
+            for _, fs in ipairs(old.hearthFonts) do
+                self:UnregisterWidgetFont(fs)
+            end
         end
-        self:ClearAllPoints()
+        self:RemoveWidget(old, "RIGHT")
+        old:UnregisterAllEvents()
+        old:SetScript("OnEvent", nil)
+        old:SetScript("OnEnter", nil)
+        old:SetScript("OnLeave", nil)
+        old:SetScript("OnMouseUp", nil)
+        old:Hide()
+        old:SetParent(nil)
+        self.hearthWidget = nil
     end
-
-    local function Refresh()
-        local _, class = UnitClass("player")
-        if class == "DRUID" and TB_IsSpellKnown(DREAMWALK_SPELL_ID) then
-            w:Show()
-            label:SetText(TB_GetSpellName(DREAMWALK_SPELL_ID) or "Dreamwalk")
-        else
-            w:Hide()
-        end
-        w:UpdateLayout()
-        addon:LayoutGroups()
-    end
-
-    w:RegisterEvent("PLAYER_LOGIN")
-    w:RegisterEvent("PLAYER_ENTERING_WORLD")
-    w:RegisterEvent("SPELLS_CHANGED")
-    w:SetScript("OnEvent", Refresh)
-    Refresh()
-    C_Timer.After(0, Refresh)
-
-    return w
+    local hearth = CreateHearthWidget()
+    self:RegisterWidget(hearth, "RIGHT")
+    self:RefreshLayout()
 end
 
 
@@ -370,8 +443,4 @@ function addon:InitializeWidgets()
     -- RIGHT group: first = anchored to bar's right edge (outer corner).
     local hearth = CreateHearthWidget()
     self:RegisterWidget(hearth, "RIGHT")
-    local dreamwalk = CreateDreamwalkWidget()
-    self:RegisterWidget(dreamwalk, "RIGHT")
 end
-
-
