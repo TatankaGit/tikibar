@@ -19,12 +19,27 @@ local SECONDARY_HEARTHS = {
 -- Class teleport spell IDs, keyed by English class token.
 -- Checked against IsSpellKnown at popup-build time; unlearned spells are omitted.
 local CLASS_TELEPORTS = {
-    DRUID       = { id = 193753, name = "Dreamwalk", dest = "Dreamwalk", isToy = false  },  -- Dreamwalk
-    DEATHKNIGHT = { id = 50977, name = "Death Gate", dest = "Death Gate", isToy = false  },  -- Death Gate
-    MONK        = { id = 126892, name = "Zen Pilgrimage", dest = "Zen Pilgrimage", isToy = false  },  -- Zen Pilgrimage
-    SHAMAN      = { id = 556, name = "Astral Recall", dest = "Astral Recall", isToy = false  },  -- Astral Recall
+    { id = 193753, name = "Dreamwalk", dest = "Dreamwalk", isToy = false  },  -- Dreamwalk
+    { id = 50977, name = "Death Gate", dest = "Death Gate", isToy = false  },  -- Death Gate
+    { id = 126892, name = "Zen Pilgrimage", dest = "Zen Pilgrimage", isToy = false  },  -- Zen Pilgrimage
+    { id = 556, name = "Astral Recall", dest = "Astral Recall", isToy = false  },  -- Astral Recall
 }
 
+local RACIAL_TELEPORTS = {
+    { id = 1238686, name = "Rootwalking", dest = "The Den", isToy = false },
+    { id = 265225, name = "Mole Machine", dest = "Mole Hole", isToy = false },
+}
+
+local MYTHIC_TELEPORTS = {
+    { id = 393273,  name = "Algeth'ar Academy",         dest = "Algeth'ar Academy",         mapID = 402 },
+    { id = 1254572, name = "Magister's Terrace",        dest = "Magister's Terrace",        mapID = 558 },
+    { id = 1254559, name = "Maisara Caverns",           dest = "Maisara Caverns",           mapID = 560 },
+    { id = 1254563, name = "Nexus-Point Xenas",         dest = "Nexus-Point Xenas",         mapID = 559 },
+    { id = 1254555, name = "Pit of Saron",              dest = "Pit of Saron",              mapID = 556 },
+    { id = 1254551, name = "Seat of the Triumvirate",   dest = "Seat of the Triumvirate",   mapID = 239 },
+    { id = 159898,  name = "Skyreach",                  dest = "Skyreach",                  mapID = 161 },
+    { id = 1254400, name = "Windrunner's Spire",        dest = "Windrunner's Spire",        mapID = 557 },
+}
 
 -- ============================================================
 -- Clock Widget
@@ -32,10 +47,11 @@ local CLASS_TELEPORTS = {
 
 local function CreateClockWidget()
     local clockWidget = CreateFrame("Frame", "ClockWidget", addon.bar)
-    local clockText = clockWidget:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local clockText = clockWidget:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     clockText:SetPoint("CENTER")
     clockText:SetText("00:00")
     clockText:SetWidth(0)
+    addon:RegisterWidgetFont(clockText)
 
     -- Update time text
     local function UpdateTime()
@@ -77,8 +93,7 @@ local function CreateClockWidget()
     end)
 
     C_Timer.After(0, function()
-        clockWidget:UpdateLayout()
-        addon:LayoutGroups()
+        addon:ScheduleLayoutRefresh()
     end)
 
     return clockWidget
@@ -94,6 +109,7 @@ local function CreateSpecWidget()
     specText:SetPoint("CENTER")
     specText:SetText("Placeholder")
     specText:SetWidth(0)
+    addon:RegisterWidgetFont(specText)
 
     local function UpdateSpecText()
         local specIndex = GetSpecialization()
@@ -110,8 +126,7 @@ local function CreateSpecWidget()
     specWidget:RegisterEvent("PLAYER_LOGIN")
     specWidget:SetScript("OnEvent", function(self, event)
         UpdateSpecText()
-        self:UpdateLayout()
-        addon:LayoutGroups()
+        addon:ScheduleLayoutRefresh()
     end)
 
     function specWidget:UpdateLayout()
@@ -154,8 +169,7 @@ local function CreateSpecWidget()
 
     C_Timer.After(0, function()
         UpdateSpecText()
-        specWidget:UpdateLayout()
-        addon:LayoutGroups()
+        addon:ScheduleLayoutRefresh()
     end)
 
     return specWidget
@@ -169,37 +183,128 @@ local function CreateHearthWidget()
     local POPUP_W   = 220
     local ENTRY_H   = 22
     local HEADER_H  = 18
-    local PAD       = 6
+    local PAD       = addon.DEFAULTS.padding
 
-    local hearthWidget = CreateFrame("Frame", "HearthWidget", addon.bar)
+    local hearthWidget = CreateFrame("Frame", nil, addon.bar)
+    local hearthFonts = {}
+    local function registerHearthFont(fs)
+        table.insert(hearthFonts, fs)
+        addon:RegisterWidgetFont(fs)
+    end
+
     local hearthText = hearthWidget:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     hearthText:SetPoint("CENTER")
     hearthText:SetText("Home")
     hearthText:SetWidth(0)
+    registerHearthFont(hearthText)
 
-    -- Establish avaialble teleports/hearths
+    local popup = CreateFrame("Frame", nil, hearthWidget, "BackdropTemplate")
+    hearthWidget.popup = popup
+    popup:SetSize(POPUP_W, ENTRY_H * 2 + HEADER_H + PAD * 2)
+    popup:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+    popup:SetBackdropColor(0, 0, 0, 0.75)
+    popup:SetBackdropBorderColor(0.15, 0.15, 0.15, 1)
+    popup:Hide()
+
+    -- Establish avaialble teleports/hearths and their secureactionbuttons
 
     local availableTeleports = {}
-    availableTeleports.hearthstone = {id = addon.DEFAULTS.hearthToyID, name = TikiBarDB.hearthToyName, dest = GetBindLocation(), isToy = false}
+    local teleportButtons = {}
+
+    table.insert(availableTeleports, {id = TikiBarDB.hearthToyID, name = TikiBarDB.hearthToyName, dest = GetBindLocation(), isToy = true})
     for _, teleport in ipairs(SECONDARY_HEARTHS) do
         if PlayerHasToy(teleport.id) then
-            availableTeleports[teleport.name] = {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy}
+            table.insert(availableTeleports, {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy})
         end
     end
     for _, teleport in ipairs(CLASS_TELEPORTS) do
         if IsSpellKnown(teleport.id) then
-            availableTeleports.[teleport.name] = {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy}
+            table.insert(availableTeleports, {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy})
+        end
+    end
+    for _, teleport in ipairs(RACIAL_TELEPORTS) do
+        if IsSpellKnown(teleport.id) then
+            table.insert(availableTeleports, {id = teleport.id, name = teleport.name, dest = teleport.dest, isToy = teleport.isToy})
         end
     end
 
-    -- Create Menu
+    function hearthWidget:CreateTeleportButtons(index, teleport)
+        local btn = CreateFrame("Button", nil, self.popup, "SecureActionButtonTemplate")
+        btn:SetSize(100, 20)
+        btn:SetPoint("TOPLEFT", self.popup, "TOPLEFT", PAD, -PAD - (index - 1) * ENTRY_H)
+        btn:SetAttribute("type", teleport.isToy and "toy" or "spell")
+        btn:SetAttribute(teleport.isToy and "toy" or "spell", teleport.id)
+        btn:RegisterForClicks("AnyUp", "AnyDown")
+        -- Remove default button textures
+        btn:SetNormalTexture("")
+        btn:SetHighlightTexture("")
+        btn:SetPushedTexture("")
+        btn:SetScript("PostClick", function()
+            popup:Hide()
+        end)
+    
+        local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        label:SetAllPoints(btn)
+        label:SetJustifyH("LEFT")
+        label:SetJustifyV("MIDDLE")
+        label:SetText(teleport.name)
+        registerHearthFont(label)
+
+        btn.label = label
+        teleportButtons[index] = btn
+    end
+
+    function hearthWidget:RefreshPopupLayout()
+        local maxWidth = 0
+        for _, btn in ipairs(teleportButtons) do
+            if btn then
+                maxWidth = math.max(maxWidth, btn.label:GetStringWidth())
+            end
+        end
+        local y = PAD
+        for _, btn in ipairs(teleportButtons) do
+            if not btn then break end
+            local h = math.max(ENTRY_H, btn.label:GetHeight())
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", popup, "TOPLEFT", PAD, -y)
+            btn:SetHeight(h)
+            btn:SetWidth(maxWidth + PAD * 2)
+            y = y + h + 2
+        end
+        popup:SetSize(maxWidth + PAD * 2, y + PAD)
+        popup:SetPoint("BOTTOM", hearthWidget, "TOPLEFT", 0, 0)
+    end
+
+    for i, teleport in ipairs(availableTeleports) do
+        hearthWidget:CreateTeleportButtons(i, teleport)
+    end
+
+    popup:SetFrameStrata("HIGH")
+    popup:EnableMouse(true)
+
+    hearthWidget:RefreshPopupLayout()
+
 
 
 
     -- ── Widget functions ──────────────────────────────────────
     local function UpdateHearthText()
         hearthText:SetText((GetBindLocation and GetBindLocation()) or "Home")
+        GameTooltip:Hide()
     end
+    popup:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            if popup:IsShown() then
+                popup:Hide()
+            else
+                popup:Show()
+            end
+        end
+    end)
 
     function hearthWidget:UpdateLayout()
         local padding = TikiBarDB.padding
@@ -209,87 +314,293 @@ local function CreateHearthWidget()
 
     hearthWidget:EnableMouse(true)
 
+    -- Tooltip
+    hearthWidget:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine("Hearthstones")
+        GameTooltip:AddLine("Left-Click to open teleport menu", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+
+    hearthWidget:SetScript("OnLeave", function(self)
+        GameTooltip:Hide()
+    end)
+
+    -- Click handler
+    hearthWidget:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            if popup:IsShown() then
+                popup:Hide()
+            else
+                popup:Show()
+            end
+        end
+    end)
+
+    -- Event Handlers
     hearthWidget:RegisterEvent("PLAYER_LOGIN")
     hearthWidget:RegisterEvent("PLAYER_ENTERING_WORLD")
     hearthWidget:RegisterEvent("HEARTHSTONE_BOUND")
     hearthWidget:SetScript("OnEvent", function(self)
         C_Timer.After(0, function()
             UpdateHearthText()
-            self:UpdateLayout()
-            addon:LayoutGroups()
+            addon:ScheduleLayoutRefresh()
         end)
     end)
 
+    -- Events only run on login/world/hearth change; after a mid-session reinit they do not fire
+    -- again, so apply bind location here (same text RefreshLayout will use for width).
+    UpdateHearthText()
+
+    hearthWidget.hearthFonts = hearthFonts
+    addon.hearthWidget = hearthWidget
     return hearthWidget
 end
 
--- ============================================================
--- Dreamwalk (Druid)
--- SecureActionButtonTemplate: only type/spell via SecureHandlerExecute (restricted
--- env rejects _onclick and macrotext-style attributes on SetAttribute).
--- ============================================================
-
-local DREAMWALK_SPELL_ID = 193753
-
-local function CreateDreamwalkWidget()
-    local w = CreateFrame("Frame", "TikiBarDreamwalkWidget", addon.bar)
-    w:EnableMouse(true)
-
-    local btn = CreateFrame("Button", "TikiBarDreamwalkButton", w, "SecureActionButtonTemplate")
-    btn:SetSize(100, 20)
-    btn:SetPoint("CENTER")
-    btn:SetAttribute("type", "spell")
-    btn:SetAttribute("spell", DREAMWALK_SPELL_ID)
-    btn:RegisterForClicks("AnyUp", "AnyDown")
-    -- Remove default button textures
-    btn:SetNormalTexture("")
-    btn:SetHighlightTexture("")
-    btn:SetPushedTexture("")
-
-    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    label:SetAllPoints(btn)
-    label:SetText("Dreamwalk")
-
-
-    btn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:ClearLines()
-        GameTooltip:AddLine(TB_GetSpellName(DREAMWALK_SPELL_ID) or "Dreamwalk", 1, 1, 1)
-        GameTooltip:AddLine("Click to cast", 0.75, 0.75, 0.75)
-        GameTooltip:Show()
-    end)
-    btn:SetScript("OnLeave", GameTooltip_Hide)
-
-    function w:UpdateLayout()
-        local padding = (TikiBarDB and TikiBarDB.padding) or addon.DEFAULTS.padding
-        if self:IsShown() then
-            self:SetSize(label:GetStringWidth() + padding * 2, TikiBarDB and TikiBarDB.height or addon.DEFAULTS.height)
-        else
-            self:SetSize(0, TikiBarDB and TikiBarDB.height or addon.DEFAULTS.height)
+function addon:ReinitializeHearthWidget()
+    local old = self.hearthWidget
+    if old then
+        if old.hearthFonts then
+            for _, fs in ipairs(old.hearthFonts) do
+                self:UnregisterWidgetFont(fs)
+            end
         end
+        self:RemoveWidget(old, "RIGHT")
+        old:UnregisterAllEvents()
+        old:SetScript("OnEvent", nil)
+        old:SetScript("OnEnter", nil)
+        old:SetScript("OnLeave", nil)
+        old:SetScript("OnMouseUp", nil)
+        old:Hide()
+        old:SetParent(nil)
+        self.hearthWidget = nil
+    end
+    local hearth = CreateHearthWidget()
+    self:RegisterWidget(hearth, "RIGHT")
+    self:RefreshLayout()
+end
+
+
+-- ============================================================
+-- Bag Widget
+-- ============================================================
+
+local function CreateBagWidget()
+    local bagWidget = CreateFrame("Frame", "BagWidget", addon.bar)
+    local bagText = bagWidget:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    bagText:SetPoint("CENTER")
+    bagText:SetWidth(0)
+    addon:RegisterWidgetFont(bagText)
+
+    -- Inline texture escape: path, height, width
+    local GOLD_ICON = "|TInterface\\MoneyFrame\\UI-GoldMedallion:14:14|t"
+
+    local function UpdateBagText()
+        local money = GetMoney()
+        local gold = math.floor(money / 10000)
+        -- GetCoinTextureString handles the icon markup for you
+        bagText:SetText(GetCoinTextureString(gold * 10000))
+        addon:ScheduleLayoutRefresh()
+    end
+
+    function bagWidget:UpdateLayout()
+        local padding = TikiBarDB.padding
+        self:SetSize(bagText:GetStringWidth() + padding * 2, TikiBarDB.height)
         self:ClearAllPoints()
     end
 
-    local function Refresh()
-        local _, class = UnitClass("player")
-        if class == "DRUID" and TB_IsSpellKnown(DREAMWALK_SPELL_ID) then
-            w:Show()
-            label:SetText(TB_GetSpellName(DREAMWALK_SPELL_ID) or "Dreamwalk")
-        else
-            w:Hide()
+    bagWidget:EnableMouse(true)
+
+    -- Update whenever the player's money changes
+    bagWidget:RegisterEvent("PLAYER_MONEY")
+    bagWidget:SetScript("OnEvent", function(self, event)
+        if event == "PLAYER_MONEY" then
+            UpdateBagText()
         end
-        w:UpdateLayout()
-        addon:LayoutGroups()
+    end)
+
+    bagWidget:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            ToggleAllBags()
+        end
+    end)
+
+    -- Populate on load
+    UpdateBagText()
+
+    return bagWidget
+end
+
+
+-- ============================================================
+-- Mythic Widget
+-- ============================================================
+
+local function CreateMythicWidget()
+    local mythicWidget = CreateFrame("Frame", "MythicWidget", addon.bar)
+    local mythicText = mythicWidget:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    mythicText:SetPoint("CENTER")
+    mythicText:SetText("Mythic")
+    mythicText:SetWidth(0)
+    addon:RegisterWidgetFont(mythicText)
+
+    -- Update widget label: key info if available, else M+: score fallback
+    function mythicWidget:UpdateMythicText()
+        local level = C_MythicPlus.GetOwnedKeystoneLevel()
+        local mapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
+        if level and mapID then
+            local name = C_ChallengeMode.GetMapUIInfo(mapID)
+            if name then
+                mythicText:SetText("Key: " .. name .. " +" .. level)
+                return
+            end
+        end
+        -- Fallback: M+: <score>
+        local score = C_ChallengeMode.GetOverallDungeonScore()
+        local color = C_ChallengeMode.GetDungeonScoreRarityColor(score)
+        if color then
+            local hex = string.format("|cff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
+            mythicText:SetText("M+: " .. hex .. score .. "|r")
+        else
+            mythicText:SetText("M+: " .. score)
+        end
     end
 
-    w:RegisterEvent("PLAYER_LOGIN")
-    w:RegisterEvent("PLAYER_ENTERING_WORLD")
-    w:RegisterEvent("SPELLS_CHANGED")
-    w:SetScript("OnEvent", Refresh)
-    Refresh()
-    C_Timer.After(0, Refresh)
+    function mythicWidget:UpdateLayout()
+        mythicWidget:UpdateMythicText()
+        local padding = TikiBarDB.padding
+        self:SetSize(mythicText:GetStringWidth() + padding * 2, TikiBarDB.height)
+        self:ClearAllPoints()
+    end
 
-    return w
+    -- Popup creation for the mythic widget
+    local POPUP_W  = 200
+    local ENTRY_H  = 20
+    local HEADER_H = 18
+    local PAD      = addon.DEFAULTS.padding
+    local popup = CreateFrame("Frame", nil, mythicWidget, "BackdropTemplate")
+    mythicWidget.popup = popup
+    popup:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+    })
+    popup:SetBackdropColor(0, 0, 0, 0.75)
+    popup:SetBackdropBorderColor(0.15, 0.15, 0.15, 1)
+    popup:Hide()
+
+    -- Popup header: M+: <score>
+    local headerText = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    headerText:SetPoint("TOPLEFT", popup, "TOPLEFT", PAD, -PAD)
+    headerText:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -PAD, -PAD)
+    headerText:SetJustifyH("CENTER")
+    headerText:SetHeight(HEADER_H)
+
+    local function UpdatePopupHeader()
+        local score = C_ChallengeMode.GetOverallDungeonScore()
+        local color = C_ChallengeMode.GetDungeonScoreRarityColor(score)
+        if color then
+            local hex = string.format("|cff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
+            headerText:SetText("M+: " .. hex .. score .. "|r")
+        else
+            headerText:SetText("M+: " .. score)
+        end
+    end
+
+    -- Buttons for the popup
+    local mythicButtons = {}
+
+    function mythicWidget:CreateMythicTeleportButton(index, teleport)
+        local btn = CreateFrame("Button", nil, popup, "SecureActionButtonTemplate")
+        btn:SetSize(POPUP_W - PAD * 2, ENTRY_H)
+        btn:SetAttribute("type", "spell")
+        btn:SetAttribute("spell", teleport.id)
+        btn:RegisterForClicks("AnyUp", "AnyDown")
+        btn:SetNormalTexture("")
+        btn:SetHighlightTexture("")
+        btn:SetPushedTexture("")
+        btn:SetScript("PostClick", function()
+            popup:Hide()
+        end)
+
+        -- Left: dungeon name
+        local nameLabel = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        nameLabel:SetPoint("LEFT", btn, "LEFT", 0, 0)
+        nameLabel:SetJustifyH("LEFT")
+        nameLabel:SetJustifyV("MIDDLE")
+        nameLabel:SetText(teleport.name)
+        if IsSpellKnown(teleport.id) then
+            nameLabel:SetTextColor(0, 1, 0)  -- green for known spells
+        end
+        -- unknown spells use default GameFontNormal color
+
+        -- Right: dungeon score (colored by rarity)
+        local scoreLabel = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        scoreLabel:SetPoint("RIGHT", btn, "RIGHT", 0, 0)
+        scoreLabel:SetJustifyH("RIGHT")
+        scoreLabel:SetJustifyV("MIDDLE")
+
+        local info = C_MythicPlus.GetSeasonBestForMap(teleport.mapID)
+        local score = info and info.dungeonScore or 0
+        local color = C_ChallengeMode.GetDungeonScoreRarityColor(score)
+        if color then
+            local hex = string.format("|cff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
+            scoreLabel:SetText(hex .. score .. "|r")
+        else
+            scoreLabel:SetText(tostring(score))
+        end
+
+        btn.nameLabel  = nameLabel
+        btn.scoreLabel = scoreLabel
+        mythicButtons[index] = btn
+    end
+
+    function mythicWidget:RefreshMythicPopupLayout()
+        UpdatePopupHeader()
+        local y = PAD + HEADER_H + PAD
+        for _, btn in ipairs(mythicButtons) do
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", popup, "TOPLEFT", PAD, -y)
+            btn:SetWidth(POPUP_W - PAD * 2)
+            btn:SetHeight(ENTRY_H)
+            y = y + ENTRY_H + 2
+        end
+        popup:SetSize(POPUP_W, y + PAD)
+        popup:SetPoint("BOTTOM", mythicWidget, "TOPLEFT", 0, 0)
+    end
+
+    for i, teleport in ipairs(MYTHIC_TELEPORTS) do
+        mythicWidget:CreateMythicTeleportButton(i, teleport)
+    end
+
+    mythicWidget:RefreshMythicPopupLayout()
+    popup:SetFrameStrata("HIGH")
+    popup:EnableMouse(true)
+
+    mythicWidget:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            if popup:IsShown() then
+                popup:Hide()
+            else
+                popup:Show()
+            end
+        end
+    end)
+
+    -- Refresh label and header on relevant events
+    mythicWidget:RegisterEvent("PLAYER_ENTERING_WORLD")
+    mythicWidget:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+    mythicWidget:RegisterEvent("CHALLENGE_MODE_RESET")
+    mythicWidget:SetScript("OnEvent", function(self)
+        C_Timer.After(0, function()
+            addon:ScheduleLayoutRefresh()
+        end)
+    end)
+
+    mythicWidget:EnableMouse(true)
+    mythicWidget:UpdateLayout()
+    return mythicWidget
 end
 
 
@@ -363,15 +674,15 @@ function addon:RegisterWidget(widget, anchor)
 end
 
 function addon:InitializeWidgets()
+    local mythic = CreateMythicWidget()
+    self:RegisterWidget(mythic, "CENTER")
     local clock = CreateClockWidget()
     self:RegisterWidget(clock, "CENTER")
     local spec = CreateSpecWidget()
     self:RegisterWidget(spec, "CENTER")
     -- RIGHT group: first = anchored to bar's right edge (outer corner).
+    local bags = CreateBagWidget()
+    self:RegisterWidget(bags, "RIGHT")
     local hearth = CreateHearthWidget()
     self:RegisterWidget(hearth, "RIGHT")
-    local dreamwalk = CreateDreamwalkWidget()
-    self:RegisterWidget(dreamwalk, "RIGHT")
 end
-
-

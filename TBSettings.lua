@@ -37,6 +37,34 @@ function TikiBar_BuildSettings()
     end
 
     -- ============================================================
+    -- Font Size Slider
+    -- ============================================================
+    do
+        local name = "Font Size"
+        local variable = "FontSize_Slider"
+        local defaultValue = addon.DEFAULTS.fontSize
+        local minValue = 8
+        local maxValue = 24
+        local step = 1
+
+        local function GetValue()
+            return TikiBarDB and TikiBarDB.fontSize or addon.DEFAULTS.fontSize
+        end
+
+        local function SetValue(value)
+            TikiBarDB.fontSize = value
+            addon:RefreshWidgetFonts()
+        end
+
+        local setting = Settings.RegisterProxySetting(category, variable, type(defaultValue), name, defaultValue, GetValue, SetValue)
+
+        local tooltip = "Adjust the font size for the addon."
+        local options = Settings.CreateSliderOptions(minValue, maxValue, step)
+        options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+        Settings.CreateSlider(category, setting, options, tooltip)
+    end
+
+    -- ============================================================
     -- Widget Padding Slider
     -- ============================================================
     do
@@ -78,7 +106,15 @@ function TikiBar_BuildSettings()
 
         local function SetValue(value)
             TikiBarDB.hearthToyID = value
-            TikiBarDB.hearthToyName = addon.HEARTH_TOY_OPTIONS[value].name
+            local name = addon.DEFAULTS.hearthToyName
+            for _, opt in ipairs(addon.HEARTH_TOY_OPTIONS) do
+                if opt.id == value then
+                    name = opt.name
+                    break
+                end
+            end
+            TikiBarDB.hearthToyName = name
+            addon:ReinitializeHearthWidget()
         end
 
         local setting = Settings.RegisterProxySetting(
@@ -98,7 +134,39 @@ function TikiBar_BuildSettings()
                      .. "if it is not owned, the standard Hearthstone will be used as a fallback."
         Settings.CreateDropdown(category, setting, BuildOptions, tooltip)
     end
-    
 
+
+    -- ============================================================
+    -- Hide Micro Menu Checkbox
+    -- ============================================================
+    do
+        local name = "Hide Micro Menu"
+        local variable = "DisableMicroMenu_Checkbox"
+        local defaultValue = addon.DEFAULTS.DisableMicroMenu
+
+        local function GetValue()
+            if TikiBarDB and TikiBarDB.DisableMicroMenu ~= nil then
+                return TikiBarDB.DisableMicroMenu
+            end
+            return addon.DEFAULTS.DisableMicroMenu
+        end
+
+        local function SetValue(value)
+            TikiBarDB.DisableMicroMenu = value
+            if value then
+                addon:SuppressFrame(MicroMenu)
+            end
+        end
+
+        local setting = Settings.RegisterProxySetting(
+            category, variable, type(defaultValue), name, defaultValue, GetValue, SetValue
+        )
+
+        Settings.CreateCheckbox(category, setting, "Hide the Blizzard micro menu.")
+    end
+
+    -- ============================================================
+    -- Register the category
+    -- ============================================================
     Settings.RegisterAddOnCategory(category)
 end

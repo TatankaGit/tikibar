@@ -10,10 +10,13 @@ addon.ADDON_TITLE = "Tiki Bar"
 addon.DEFAULTS    = { 
     height = 24,
     padding = 6,
+    fontSize = 12,
     hearthToyID = 0,
     hearthToyName = "Hearthstone",
+    DisableMicroMenu = true,
 }
 addon.widgets = {}
+addon.widgetFonts = {}
 addon.widgetGroups = {
     LEFT = {},
     CENTER = {},
@@ -80,63 +83,152 @@ bar:SetBackdropBorderColor(0.15, 0.15, 0.15, 1)
 
 
 -- ============================================================
+-- Hide the Blizzard bag bar and micro menu, and suppress any attempts
+-- by Blizzard's layout code to show them again.
+-- ============================================================
+local suppressedFrames = {}
+local forcedVisibleFrames = {}
+
+function addon:SuppressFrame(frame)
+    if not frame then return end
+    forcedVisibleFrames[frame] = nil  -- clear any force-visible state
+    frame:Hide()
+    frame:SetAlpha(0)
+    frame:EnableMouse(false)
+    if not suppressedFrames[frame] then
+        hooksecurefunc(frame, "Show", function(f)
+            if suppressedFrames[f] then
+                f:Hide()
+                f:SetAlpha(0)
+            end
+        end)
+        hooksecurefunc(frame, "Hide", function(f)
+            if forcedVisibleFrames[f] then
+                f:Show()
+                f:SetAlpha(1)
+            end
+        end)
+    end
+    suppressedFrames[frame] = true
+end
+
+function addon:UnsuppressFrame(frame)
+    if not frame then return end
+    suppressedFrames[frame] = nil
+    forcedVisibleFrames[frame] = true
+    frame:SetAlpha(1)
+    frame:EnableMouse(true)
+    frame:Show()
+end
+
+
+-- ============================================================
 -- Initialisation (runs after SavedVariables are loaded)
 -- ============================================================
 
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
 
 eventFrame:SetScript("OnEvent", function(self, event, name)
-    if name ~= addon.ADDON_NAME then return end
+    if event == "ADDON_LOADED" then
+        if name ~= addon.ADDON_NAME then return end
 
-    -- Initialise DB, preserving any saved values and setting default values for nil keys
-    TikiBarDB = TikiBarDB or {}
-    for k, v in pairs(addon.DEFAULTS) do
-        if TikiBarDB[k] == nil then
-            TikiBarDB[k] = v
+        -- Initialise DB, preserving any saved values and setting default values for nil keys
+        TikiBarDB = TikiBarDB or {}
+        for k, v in pairs(addon.DEFAULTS) do
+            if TikiBarDB[k] == nil then
+                TikiBarDB[k] = v
+            end
         end
-    end
 
-    -- Initialize the bar
-    bar:SetHeight(TikiBarDB.height)
-    -- Hide the Blizzard bag bar and micro menu, and suppress any attempts
-    -- by Blizzard's layout code to show them again.
-    local function HideAndSuppressFrame(frame)
-        if not frame then return end
-        frame:Hide()
-        frame:SetAlpha(0)
-        frame:EnableMouse(false)
-        hooksecurefunc(frame, "Show", function(self)
-            self:Hide()
-            self:SetAlpha(0)
-        end)
-    end
+        -- Build the settings panel now that the DB is ready
+        TikiBar_BuildSettings()
+        self:UnregisterEvent("ADDON_LOADED")
 
-    local loginFrame = CreateFrame("Frame")
-    loginFrame:RegisterEvent("PLAYER_LOGIN")
-    loginFrame:SetScript("OnEvent", function(self)
-        HideAndSuppressFrame(BagsBar)
-        HideAndSuppressFrame(MicroMenu)
+    elseif event == "PLAYER_LOGIN" then
+        -- Initialize the bar
+        bar:SetHeight(TikiBarDB.height)
+        addon:InitializeWidgets()
+        addon:RefreshLayout()
+        addon:SuppressFrame(BagsBar)
+        if TikiBarDB.DisableMicroMenu then
+            addon:SuppressFrame(MicroMenu)
+        else
+            addon:UnsuppressFrame(MicroMenu)
+        end
         self:UnregisterEvent("PLAYER_LOGIN")
-    end)
+    end
 
-    addon:InitializeWidgets()
-    addon:RefreshLayout()
-
-
-    -- Build the settings panel now that the DB is ready
-    TikiBar_BuildSettings()
-
-    self:UnregisterEvent("ADDON_LOADED")
 end)
 
 -- ============================================================
 -- Refresh the bar and rerender
 -- ============================================================
 
+function addon:RegisterWidgetFont(fontString)
+    table.insert(self.widgetFonts, fontString)
+    self:ApplyWidgetFontSize(fontString)
+end
+
+function addon:UnregisterWidgetFont(fontString)
+    for i = #self.widgetFonts, 1, -1 do
+        if self.widgetFonts[i] == fontString then
+            table.remove(self.widgetFonts, i)
+            break
+        end
+    end
+end
+
+function addon:RemoveWidget(widget, anchor)
+    anchor = anchor or "LEFT"
+    local group = self.widgetGroups[anchor]
+    for i = #group, 1, -1 do
+        if group[i] == widget then
+            table.remove(group, i)
+            break
+        end
+    end
+    for i = #self.widgets, 1, -1 do
+        if self.widgets[i] == widget then
+            table.remove(self.widgets, i)
+            break
+        end
+    end
+end
+
+function addon:ApplyWidgetFontSize(fontString)
+    local font, _, flags = fontString:GetFont()
+    if not font then return end
+    local size = (TikiBarDB and TikiBarDB.fontSize) or self.DEFAULTS.fontSize
+    fontString:SetFont(font, size, flags)
+end
+
+function addon:RefreshWidgetFonts()
+    for _, fs in ipairs(self.widgetFonts) do
+        self:ApplyWidgetFontSize(fs)
+    end
+    if self.hearthWidget and self.hearthWidget.RefreshPopupLayout then
+        self.hearthWidget:RefreshPopupLayout()
+    end
+    if self.mythicWidget and self.mythicWidget.RefreshPopupLayout then
+        self.mythicWidget:RefreshPopupLayout()
+    end
+    self:RefreshLayout()
+end
+
 function addon:RefreshLayout()
     for _, widget in ipairs(self.widgets) do
         widget:UpdateLayout()
     end
     self:LayoutGroups()
+end
+
+function addon:ScheduleLayoutRefresh()
+    if self._layoutPending then return end
+    self._layoutPending = true
+    C_Timer.After(0, function()
+        self._layoutPending = false
+        self:RefreshLayout()
+    end)
 end
