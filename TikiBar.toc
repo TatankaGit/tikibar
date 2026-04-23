@@ -1,5 +1,5 @@
 ## Interface: 120005
-## Version: 1.1.1
+## Version: 1.1.2
 ## Title: Tiki Bar
 ## Notes: Tikitiki's personal info bar
 ## Author: Tikitiki
